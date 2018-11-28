@@ -9,6 +9,10 @@
 
 #define HTTP_HOST "s1268.photobucket.com"
 #define HTTP_PORT 80
+
+#define HTTP_PHOTO_HOST "rs1268.pbsrc.com"
+#define HTTP_PHOTO_PORT 80
+
 // WiFiClientSecure client;
 
 bool PHOTOBUCCKET::getHash(void)
@@ -35,7 +39,8 @@ uint16_t PHOTOBUCCKET::getUrlNums(void)
 
 bool PHOTOBUCCKET::sendGetRequest(const char *path)
 {
-    char status[64] = {0};
+    char status[32] = {0};
+    log_i("REQUEST PATH:%s\n", path);
     String packet = "GET " + String(path) + " HTTP/1.1\r\n";
     packet += "Host: rs1268.pbsrc.com\r\n";
     packet += "Connection: keep-alive\r\n";
@@ -46,14 +51,26 @@ bool PHOTOBUCCKET::sendGetRequest(const char *path)
     packet += "Accept-Language: zh,zh-CN;q=0.9,en;q=0.8\r\n";
     println(packet);
 
+    // Serial.println(readString());
+    // return false;
+
     readBytesUntil('\r', status, sizeof(status));
+    Serial.print("response:");
     Serial.println(status);
-    if (strncmp(status, "HTTP/1.1 200 OK", strlen("HTTP/1.1 200 OK")) != 0)
+
+    if (0 != strncmp(status, "HTTP/1.1 200 OK", strlen("HTTP/1.1 200 OK")))
     {
-        log_e("GET REQUEST RESPONSE: %s\n",status);
+        log_e("GET REQUEST RESPONSE: %s\n", status);
+        readString();
         return false;
     }
 
+    if (!find("\r\n\r\n"))
+    {
+        log_e("NOT FIND BODY");
+        readString();
+        return false;
+    }
     return true;
 }
 
@@ -61,6 +78,7 @@ bool PHOTOBUCCKET::downloadPhoto(void)
 {
 
     uint16_t nums = getUrlNums();
+    log_i("SEARCH URL:%u\n", nums);
     if (!nums)
     {
         return false;
@@ -82,26 +100,42 @@ bool PHOTOBUCCKET::downloadPhoto(void)
     JsonArray &root = jsonBuffer.parseArray(jsonString);
     if (!root.success())
     {
+        log_e("PARSER JSON FAIL");
         return false;
     }
     //!!  ////////////////////////////////////////////////////////////////////////////!!!!!
 
-    if (!connect("rs1268.pbsrc.com", 80))
+    if (!connect(HTTP_PHOTO_HOST, HTTP_PHOTO_PORT))
     {
         log_e("CONNECT HOST FAIL");
         return false;
     }
 
-    for (int i = 0; i < nums; ++i)
+    // for (int i = 0; i < nums; ++i)
+    for (int i = 0; i < 2; ++i)
     {
+        log_i("-----------------------\r\n");
+        if (!connected())
+        {
+            log_e("LOST HOST CONNECT");
+            return false;
+        }
         //Hander url path
-        String url = String(root[i]);
+        String url = String((const char *)root[i]);
         int f = url.indexOf("com") + 3;
         if (f < 0)
             continue;
         url = url.substring(f);
         //Send GET Requests
-        sendGetRequest(url.c_str());
+        if (!sendGetRequest(url.c_str()))
+        {
+            log_e("REQUEST ERROR");
+            continue;
+        }
+        else
+        {
+            // Serial.println(readString());
+        }
         //Open file store photo to sd card
     }
 

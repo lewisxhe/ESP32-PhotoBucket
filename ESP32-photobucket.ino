@@ -14,6 +14,15 @@
 #include "miniz.h"
 #include "mini_gzip.h"
 
+
+#ifndef NETWORK_SSID
+#define NETWORK_SSID
+#define NETWORK_PASSWORD
+#define USER_NAME
+#define PASSWORD
+#endif
+
+
 PHOTOBUCCKET photoWeb;
 // AsyncWebServer server(80);
 const char *ssid = NETWORK_SSID;      // Put your SSID here
@@ -180,7 +189,9 @@ void setup()
     // photoWeb.addToFile();
     // photoWeb.removeUrlFile();
 
-    photoWeb.login(USER_NAME, PASSWORD);
+    // photoWeb.login(USER_NAME, PASSWORD);
+
+    photoWeb.downloadPhoto();
     // server.on("/bmp", HTTP_GET, [](AsyncWebServerRequest *request) {
     //     Serial.println("BMP");
     //     request->send(FILESYSTEM, "/TIM.bmp", "image/bmp");
