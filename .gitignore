@@ -1,0 +1,8 @@
+build
+.vscode
+passwd.h
+*.json
+*.htm
+*.html
+tmp.cpp
+data
