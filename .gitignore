@@ -6,3 +6,4 @@ passwd.h
 *.html
 tmp.cpp
 data
+str.cpp

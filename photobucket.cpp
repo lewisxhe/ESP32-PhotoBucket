@@ -1,9 +1,6 @@
-
-#include <FS.h>
-#include <SPIFFS.h>
 #include "photobucket.h"
+#include "config.h"
 
-#define FILESYSTEM SPIFFS
 #define HTTPS_HOST "secure.photobucket.com"
 #define HTTPS_PORT 443
 
@@ -15,12 +12,7 @@
 
 // WiFiClientSecure client;
 
-bool PHOTOBUCCKET::getHash(void)
-{
-    return true;
-}
-
-uint16_t PHOTOBUCCKET::getUrlNums(void)
+uint16_t PHOTOBUCCKET::getUrlNums()
 {
     File f = FILESYSTEM.open(DATABASE_JSON_ARRAY_SIZE_FILE, FILE_READ);
     if (!f)
@@ -37,10 +29,34 @@ uint16_t PHOTOBUCCKET::getUrlNums(void)
     return size.get<uint32_t>("size");
 }
 
+uint32_t PHOTOBUCCKET::searchContent()
+{
+    char status[64] = {0};
+    while (1)
+    {
+        readBytesUntil('\r', status, sizeof(status));
+        // Serial.print("Search:");
+        String str = String(status);
+        // Serial.println(str);
+
+        int index = str.indexOf("Content-Length:");
+        if (index > 0)
+        {
+            int s, e;
+            str = str.substring(index);
+            s = str.indexOf(" ");
+            e = str.indexOf("\r\n");
+            log_i("Search content:%lu", str.substring(s, e).toInt());
+            return str.substring(s, e).toInt();
+        }
+    }
+    return 0;
+}
+
 bool PHOTOBUCCKET::sendGetRequest(const char *path)
 {
     char status[32] = {0};
-    log_i("REQUEST PATH:%s\n", path);
+    // log_i("REQUEST PATH:%s\n", path);
     String packet = "GET " + String(path) + " HTTP/1.1\r\n";
     packet += "Host: rs1268.pbsrc.com\r\n";
     packet += "Connection: keep-alive\r\n";
@@ -51,30 +67,20 @@ bool PHOTOBUCCKET::sendGetRequest(const char *path)
     packet += "Accept-Language: zh,zh-CN;q=0.9,en;q=0.8\r\n";
     println(packet);
 
-    // Serial.println(readString());
-    // return false;
-
     readBytesUntil('\r', status, sizeof(status));
-    Serial.print("response:");
-    Serial.println(status);
+    log_i("RESPONSE:%s", status);
 
     if (0 != strncmp(status, "HTTP/1.1 200 OK", strlen("HTTP/1.1 200 OK")))
     {
         log_e("GET REQUEST RESPONSE: %s\n", status);
         readString();
-        return false;
-    }
-
-    if (!find("\r\n\r\n"))
-    {
-        log_e("NOT FIND BODY");
-        readString();
+        // flush();
         return false;
     }
     return true;
 }
 
-bool PHOTOBUCCKET::downloadPhoto(void)
+bool PHOTOBUCCKET::downloadPhoto()
 {
 
     uint16_t nums = getUrlNums();
@@ -103,86 +109,98 @@ bool PHOTOBUCCKET::downloadPhoto(void)
         log_e("PARSER JSON FAIL");
         return false;
     }
+
     //!!  ////////////////////////////////////////////////////////////////////////////!!!!!
 
-    if (!connect(HTTP_PHOTO_HOST, HTTP_PHOTO_PORT))
+    //! test
+    for (int i = 0; i < nums; ++i)
     {
-        log_e("CONNECT HOST FAIL");
-        return false;
-    }
+        if (!connect(HTTP_PHOTO_HOST, HTTP_PHOTO_PORT))
+        {
+            log_e("CONNECT HOST FAIL");
+            return false;
+        }
 
-    // for (int i = 0; i < nums; ++i)
-    for (int i = 0; i < 2; ++i)
-    {
-        log_i("-----------------------\r\n");
         if (!connected())
         {
             log_e("LOST HOST CONNECT");
             return false;
         }
-        //Hander url path
         String url = String((const char *)root[i]);
-        int f = url.indexOf("com") + 3;
-        if (f < 0)
+
+        int startIndex = url.lastIndexOf("/");
+        if (startIndex < 0)
+            return false;
+        int endIndex = url.lastIndexOf("?");
+        if (endIndex < 0)
+            return false;
+        String name = url.substring(startIndex, endIndex);
+
+        log_i("URL:%s", url.c_str());
+
+        if (name.endsWith(".gif"))
             continue;
-        url = url.substring(f);
+
+        log_i("DOWNLOAD[%d] : %s", i, name.c_str());
+        //Hander url path
+        startIndex = url.indexOf("com") + 3;
+        if (startIndex < 0)
+            continue;
+        url = url.substring(startIndex);
+
         //Send GET Requests
         if (!sendGetRequest(url.c_str()))
         {
             log_e("REQUEST ERROR");
             continue;
         }
-        else
+
+        uint32_t len = searchContent();
+        if (!len)
+            return false;
+
+        // skip html head
+        if (!find("\r\n\r\n"))
         {
-            // Serial.println(readString());
+            log_e("NOT FIND BODY");
+            readString();
+            return false;
         }
-        //Open file store photo to sd card
-    }
 
-    return true;
-}
+        //! body is here
+        //TODO Open file store photo to sd card
 
-int PHOTOBUCCKET::searchIndex(void)
-{
-    int index = -1;
-    uint64_t timeStamp = millis();
-    while (connected())
-    {
-        if (available())
+        log_i("OPEN [%s] Begin ...", name.c_str());
+
+        // TODO : Determine if the file is duplicated
+        // TODO ....
+        f = FILESYSTEM.open(name, FILE_WRITE);
+        if (!f)
         {
-            timeStamp = millis();
-            index = find("collectionData:");
-            if (index > 0)
+            log_e("OPEN FILE FAIL");
+            return false;
+        }
+
+        uint64_t timeStamp = millis();
+        size_t filesize = 0;
+        while (1)
+        {
+            int r = read();
+            if (r != -1)
             {
-                log_i("SCAREN Index : %d\n", index);
+                f.write(r);
+                ++filesize;
+                timeStamp = millis();
+            }
+            if (millis() - timeStamp > 10 * 1000)
+            {
+                log_e("TIME OUT");
                 break;
             }
         }
-        if ((millis() - timeStamp) > 15000)
-        {
-            log_e("[TIME OUT]");
-            break;
-        }
-    }
-    return index;
-}
-
-bool PHOTOBUCCKET::readConntent(void)
-{
-    uint64_t timeStamp = millis();
-    json = "";
-    while (connected())
-    {
-        if (available())
-        {
-            json += readString();
-            timeStamp = millis();
-        }
-        if ((millis() - timeStamp) > 30000)
-        {
-            log_e("[TIME OUT]");
-            break;
-        }
+        log_i("FILE SIZE : %lu", filesize);
+        f.close();
+        stop();
     }
     return true;
 }
@@ -197,7 +215,7 @@ bool PHOTOBUCCKET::searchSameUrl(JsonArray &array, const char *url)
     return false;
 }
 
-void PHOTOBUCCKET::removeUrlFile(void)
+void PHOTOBUCCKET::removeUrlFile()
 {
     if (FILESYSTEM.exists(DATABASE_FILENAME))
     {
@@ -205,7 +223,7 @@ void PHOTOBUCCKET::removeUrlFile(void)
     }
 }
 
-bool PHOTOBUCCKET::parseUrl(void)
+bool PHOTOBUCCKET::parseUrl()
 {
 
     log_i("SRAM:%lu\n", ESP.getPsramSize());
@@ -363,13 +381,95 @@ bool PHOTOBUCCKET::parseUrl(void)
     return true;
 }
 
+int PHOTOBUCCKET::searchIndex()
+{
+    int index = -1;
+    uint64_t timeStamp = millis();
+    while (connected())
+    {
+        if (available())
+        {
+            timeStamp = millis();
+            index = find("collectionData:");
+            if (index > 0)
+            {
+                log_i("Search Index : %d\n", index);
+                break;
+            }
+        }
+        if ((millis() - timeStamp) > 15000)
+        {
+            log_e("[TIME OUT]");
+            break;
+        }
+    }
+    return index;
+}
+
+// TODO Need to optimize data reception
+bool PHOTOBUCCKET::readConntent()
+{
+    uint64_t timeStamp = millis();
+    json = "";
+
+    // !
+    char *str = (char *)heap_caps_malloc(100 * 1024, MALLOC_CAP_SPIRAM);
+    if (!str)
+    {
+        log_e("MALLOC STR BUFFER FAIL");
+        return false;
+    }
+    // !
+    memset(str, 0, 100 * 1024);
+    char *r = str;
+    while (connected())
+    {
+        if (available())
+        {
+#if 0
+            json += readString();
+#else
+            *r++ = (char)read();
+            // str++;
+            // Serial.print((char)read());
+#endif
+            timeStamp = millis();
+        }
+        if ((millis() - timeStamp) > 30000)
+        {
+            log_e("[TIME OUT]");
+            break;
+        }
+    }
+    //!
+
+    const char *found = strstr(str, ",\"currentAlbumPath\"");
+    if (found == NULL)
+    {
+        log_e("CAN'T FIND STR");
+        return false;
+    }
+    int index = found - str;
+    Serial.printf("Search : %d\n", index);
+    str[index] = '}';
+    str[index + 1] = '\0';
+    Serial.printf("%s\n", str);
+    free(str);
+    // return false;
+    //!
+    return true;
+}
+
 bool PHOTOBUCCKET::login(const char *username, const char *password)
 {
+    char status[64];
     String packet = "GET /user/" + String(username) + "/library/ HTTP/1.1\r\n";
     packet += "Host: s1268.photobucket.com\r\n";
     packet += "Connection: keep-alive\r\n";
+    packet += "Pragma: no-cache\r\n";
+    packet += "Cache-Control: no-cache\r\n";
     packet += "Upgrade-Insecure-Requests: 1\r\n";
-    packet += "User-Agent: Mozilla/5.0 (Linux; Android 8.0.0; LG-US998) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.80 Mobile Safari/537.36\r\n";
+    packet += "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.75 Safari/537.36\r\n";
     packet += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\r\n";
     packet += "Referer: http://www.photobucket.com/\r\n";
 
@@ -386,8 +486,15 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
         log_e("CONNECT HOST FAIL");
         return false;
     }
-
     print(packet);
+
+    readBytesUntil('\r', status, sizeof(status));
+    log_i("RESPONSE:%s", status);
+    if (0 != strncmp(status, "HTTP/1.1 200 OK", strlen("HTTP/1.1 200 OK")))
+    {
+        stop();
+        return false;
+    }
 
     int index = searchIndex();
     if (index < 0)
@@ -414,78 +521,9 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
 #ifdef ENABLE_PRINT_SRC_JSON_BUFFER
         Serial.println(json);
 #endif
-        log_e("DATA NOT INVALUE");
+        log_e("DATA INVALUE");
         stop();
         return false;
     }
     return parseUrl();
 }
-
-void PHOTOBUCCKET::getPictureJson(void)
-{
-
-    if (!isConnect)
-        return;
-    String packet = "GET /user/Z398507699lf/library/ HTTP/1.1\r\n";
-    packet += "Host: s1268.photobucket.com\r\n";
-    packet += "Connection: keep-alive\r\n";
-    packet += "Upgrade-Insecure-Requests: 1\r\n";
-    packet += "User-Agent: Mozilla/5.0 (Linux; Android 8.0.0; LG-US998) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.80 Mobile Safari/537.36\r\n";
-    packet += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\r\n";
-    packet += "Referer: http://www.photobucket.com\r\n";
-    packet += "Accept-Encoding: gzip, deflate\r\n";
-    packet += "Accept-Language: zh,zh-CN;q=0.9,en;q=0.8packet += \r\n";
-    packet += "\r\n\r\n";
-
-    print(packet);
-
-    bzero(status, sizeof(status));
-
-    Serial.println(readString());
-    return;
-
-    readBytesUntil('\r', status, sizeof(status));
-    Serial.println(status);
-
-    if (strncmp(status, "HTTP/1.1 302 Found", strlen("HTTP/1.1 302 Found")))
-    {
-        Serial.print("Login Unexpected response: ");
-        Serial.println(status);
-        isConnect = false;
-        stop();
-        return;
-    }
-}
-
-#if 0
-#ifdef USE_GZIP
-    char *path = "/index.tar.gz";
-#else
-    char *path = "/index.html"
-#endif
-    int rBytes;
-    int wBytes = 1024;
-    uint8_t buffer[wBytes];
-    File f = FILESYSTEM.open(path, FILE_WRITE);
-    if (!f)
-    {
-        log_e("[OPEN FILESYSTEM FAIL]");
-        stop();
-        return false;
-    }
-#endif
-
-// String packet = "POST /action/auth/login HTTP/1.1\r\n";
-// packet += "Host: secure.photobucket.com\r\n";
-// packet += "Connection: keep-alive\r\n";
-// packet += "Content-Length: " + String(body.length()) + "\r\n";
-// packet += "Cache-Control: max-age=0\r\n";
-// packet += "Origin: https://secure.photobucket.com\r\n";
-// packet += "Upgrade-Insecure-Requests: 1\r\n";
-// packet += "User-Agent: Mozilla/5.0 (Linux; Android 8.0.0; LG-US998) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.80 Mobile Safari/537.36\r\n";
-// packet += "Content-Type: application/x-www-form-urlencoded\r\n";
-// packet += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\r\n";
-// packet += "Referer: https://secure.photobucket.com/login\r\n";
-// packet += "Accept-Encoding: gzip, deflate, br\r\n";
-// packet += "Accept-Language: zh,zh-CN;q=0.9,en;q=0.8\r\n";
-// packet += "\r\n\r\n";
