@@ -1,5 +1,8 @@
 #include "photobucket.h"
 #include "config.h"
+#include <lwip/sockets.h>
+#include <lwip/netdb.h>
+#include <errno.h>
 
 #define HTTPS_HOST "secure.photobucket.com"
 #define HTTPS_PORT 443
@@ -53,6 +56,33 @@ uint32_t PHOTOBUCCKET::searchContent()
     return 0;
 }
 
+bool PHOTOBUCCKET::getFileName(const char *url)
+{
+    _FileName = String(url);
+    int startIndex, endIndex;
+    startIndex = _FileName.lastIndexOf("/");
+    if (startIndex < 0)
+    {
+        return false;
+    }
+    endIndex = _FileName.lastIndexOf("?");
+    if (endIndex < 0)
+    {
+        return false;
+    }
+    _FileName = _FileName.substring(startIndex, endIndex);
+    return true;
+}
+
+bool PHOTOBUCCKET::isFileValid()
+{
+    File f = FILESYSTEM.open(_FileName, FILE_READ);
+    if (!f || !f.size())
+        return false;
+    f.close();
+    return true;
+}
+
 bool PHOTOBUCCKET::sendGetRequest(const char *path)
 {
     char status[32] = {0};
@@ -77,6 +107,17 @@ bool PHOTOBUCCKET::sendGetRequest(const char *path)
         // flush();
         return false;
     }
+    return true;
+}
+
+bool PHOTOBUCCKET::getUrlPath(String &url)
+{
+    int startIndex = url.indexOf("com") + 3;
+    if (startIndex < 0)
+    {
+        return false;
+    }
+    url = url.substring(startIndex);
     return true;
 }
 
@@ -112,75 +153,117 @@ bool PHOTOBUCCKET::downloadPhoto()
 
     //!!  ////////////////////////////////////////////////////////////////////////////!!!!!
 
+    int ret;
+    bufferSize = 1024;
+    struct timeval timeout;
+    size_t filesize = 0;
+    _buffer = (uint8_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_SPIRAM);
+    if (!_buffer)
+    {
+        log_e("MALLOC STR BUFFER FAIL");
+        return false;
+    }
+
     //! test
     for (int i = 0; i < nums; ++i)
+    // for (int i = 4; i < 6; ++i)
     {
-        if (!connect(HTTP_PHOTO_HOST, HTTP_PHOTO_PORT))
-        {
-            log_e("CONNECT HOST FAIL");
-            return false;
-        }
-
-        if (!connected())
-        {
-            log_e("LOST HOST CONNECT");
-            return false;
-        }
         String url = String((const char *)root[i]);
-
-        int startIndex = url.lastIndexOf("/");
-        if (startIndex < 0)
-            return false;
-        int endIndex = url.lastIndexOf("?");
-        if (endIndex < 0)
-            return false;
-        String name = url.substring(startIndex, endIndex);
+        if (
+            !getFileName(url.c_str()) || isFileValid() ||
+#ifdef DISABLE_GIF_DOWNLOAD
+            _FileName.endsWith(".gif")
+#endif
+        )
+        {
+            stop();
+            continue;
+        }
 
         log_i("URL:%s", url.c_str());
 
-        if (name.endsWith(".gif"))
-            continue;
+        delay(2000);
 
-        log_i("DOWNLOAD[%d] : %s", i, name.c_str());
-        //Hander url path
-        startIndex = url.indexOf("com") + 3;
-        if (startIndex < 0)
+        if (!getUrlPath(url))
+        {
+            stop();
             continue;
-        url = url.substring(startIndex);
+        }
+
+        if (!connect(HTTP_PHOTO_HOST, HTTP_PHOTO_PORT))
+        {
+            log_e("CONNECT HOST FAIL");
+            continue;
+        }
+
+        log_i("DOWNLOAD[%d] : %s", i, _FileName.c_str());
 
         //Send GET Requests
         if (!sendGetRequest(url.c_str()))
         {
             log_e("REQUEST ERROR");
+            stop();
             continue;
         }
 
         uint32_t len = searchContent();
         if (!len)
-            return false;
+        {
+            stop();
+            continue;
+        }
 
         // skip html head
         if (!find("\r\n\r\n"))
         {
             log_e("NOT FIND BODY");
             readString();
-            return false;
+            stop();
+            continue;
         }
 
         //! body is here
-        //TODO Open file store photo to sd card
+        log_i("OPEN [%s] Begin ...", _FileName.c_str());
 
-        log_i("OPEN [%s] Begin ...", name.c_str());
-
-        // TODO : Determine if the file is duplicated
-        // TODO ....
-        f = FILESYSTEM.open(name, FILE_WRITE);
+        f = FILESYSTEM.open(_FileName, FILE_WRITE);
         if (!f)
         {
             log_e("OPEN FILE FAIL");
-            return false;
+            stop();
+            continue;
         }
 
+#if 0
+        filesize = 0;
+        timeout.tv_sec = 30;
+        timeout.tv_usec = 0;
+        setSocketOption(SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
+
+        for (;;)
+        {
+            ret = recv(fd(), _buffer, bufferSize, 0);
+
+            if (ret > 0)
+            {
+                filesize += f.write(_buffer, ret);
+            }
+            else if (ret == -1)
+            {
+                perror("recv:");
+                stop();
+                f.close();
+                break;
+            }
+            else
+            {
+                log_i("SOCKET CLOSE");
+                break;
+            }
+        }
+        stop();
+        f.close();
+        log_i("FILE SIZE : %lu", filesize);
+#else
         uint64_t timeStamp = millis();
         size_t filesize = 0;
         while (1)
@@ -192,6 +275,8 @@ bool PHOTOBUCCKET::downloadPhoto()
                 ++filesize;
                 timeStamp = millis();
             }
+            if (len == filesize)
+                break;
             if (millis() - timeStamp > 10 * 1000)
             {
                 log_e("TIME OUT");
@@ -201,7 +286,9 @@ bool PHOTOBUCCKET::downloadPhoto()
         log_i("FILE SIZE : %lu", filesize);
         f.close();
         stop();
+#endif
     }
+    free((void *)_buffer);
     return true;
 }
 
@@ -223,12 +310,14 @@ void PHOTOBUCCKET::removeUrlFile()
     }
 }
 
-bool PHOTOBUCCKET::parseUrl()
+bool PHOTOBUCCKET::parseUrl(const char *json)
 {
 
     log_i("SRAM:%lu\n", ESP.getPsramSize());
 
-    log_i("ParseObject len : %u\n", json.length());
+    log_i("ParseObject len : %u\n", strlen(json));
+    // log_i("ParseObject len : %u\n", json.length());
+
     size_t bufferSize = JSON_ARRAY_SIZE(24) + 24 * JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 24 * JSON_OBJECT_SIZE(47) + (80 * 1024);
     DynamicJsonBuffer jsonBuffer(bufferSize);
 
@@ -371,7 +460,7 @@ bool PHOTOBUCCKET::parseUrl()
         log_e("OPEN FILE FAIL");
         return false;
     }
-    // reset buffer
+    // reset jsonBuffer
     jsonBuffer.clear();
     JsonObject &sizeJson = jsonBuffer.createObject();
     sizeJson["size"] = rootArray->size();
@@ -385,8 +474,13 @@ int PHOTOBUCCKET::searchIndex()
 {
     int index = -1;
     uint64_t timeStamp = millis();
-    while (connected())
+    while (1)
     {
+        if (!connected())
+        {
+            log_e("LOST CONNECT");
+            return -1;
+        }
         if (available())
         {
             timeStamp = millis();
@@ -407,32 +501,32 @@ int PHOTOBUCCKET::searchIndex()
 }
 
 // TODO Need to optimize data reception
-bool PHOTOBUCCKET::readConntent()
+const char *PHOTOBUCCKET::readConntent()
 {
     uint64_t timeStamp = millis();
-    json = "";
+    // json = "";
 
     // !
     char *str = (char *)heap_caps_malloc(100 * 1024, MALLOC_CAP_SPIRAM);
     if (!str)
     {
         log_e("MALLOC STR BUFFER FAIL");
-        return false;
+        return NULL;
     }
-    // !
     memset(str, 0, 100 * 1024);
     char *r = str;
-    while (connected())
+
+    while (1)
     {
+        if (!connected())
+        {
+            log_e("CONNECT LOST");
+            free((void *)str);
+            return NULL;
+        }
         if (available())
         {
-#if 0
-            json += readString();
-#else
             *r++ = (char)read();
-            // str++;
-            // Serial.print((char)read());
-#endif
             timeStamp = millis();
         }
         if ((millis() - timeStamp) > 30000)
@@ -441,23 +535,23 @@ bool PHOTOBUCCKET::readConntent()
             break;
         }
     }
-    //!
 
+    Serial.printf("ss:%s\n", str);
     const char *found = strstr(str, ",\"currentAlbumPath\"");
     if (found == NULL)
     {
         log_e("CAN'T FIND STR");
-        return false;
+        return NULL;
     }
     int index = found - str;
     Serial.printf("Search : %d\n", index);
     str[index] = '}';
     str[index + 1] = '\0';
-    Serial.printf("%s\n", str);
-    free(str);
+    // Serial.printf("%s\n", str);
+    // free(str);
     // return false;
     //!
-    return true;
+    return str;
 }
 
 bool PHOTOBUCCKET::login(const char *username, const char *password)
@@ -481,6 +575,131 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
     packet += "Accept-Language: zh,zh-CN;q=0.9,en;q=0.8\r\n";
     packet += "\r\n\r\n";
 
+#if 1
+    int ret;
+    File f;
+    size_t bufferSize = 2048;
+    struct timeval timeout;
+
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+
+    if (!connect(HTTP_HOST, HTTP_PORT))
+    {
+        log_e("CONNECT HOST FAIL");
+        return false;
+    }
+
+    //Send get request
+    print(packet);
+
+    _buffer = (uint8_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_SPIRAM);
+    if (!_buffer)
+    {
+        log_e("MALLOC STR BUFFER FAIL");
+        return false;
+    }
+
+    memset(_buffer, 0, bufferSize);
+
+    setSocketOption(SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
+
+    f = FILESYSTEM.open("/index.html", FILE_WRITE);
+    if (!f)
+    {
+        free((void *)_buffer);
+        stop();
+        log_e("OPEN FAIL");
+        return false;
+    }
+
+    for (;;)
+    {
+        if ((ret = recv(fd(), _buffer, bufferSize, 0)) == -1)
+        {
+            perror("recv:");
+            free((void *)_buffer);
+            stop();
+            f.close();
+            return false;
+        }
+        else if (ret == 0)
+        {
+            log_i("SOCKET CLOSE");
+            break;
+        }
+        else
+        {
+            f.write(_buffer, ret);
+        }
+    }
+
+    stop();
+    f.close();
+
+    f = FILESYSTEM.open("/index.html", "r");
+    if (!f)
+    {
+        log_e("OPEN FAIL");
+        return false;
+    }
+
+    int r = f.find("collectionData:");
+    if (r <= 0)
+    {
+        log_e("CAN'T FIND collectionData");
+        free((void *)_buffer);
+        f.close();
+        return false;
+    }
+    size_t cur = f.position();
+
+    log_i("cur position: %lu\n", cur);
+
+    String tag = ",\"currentAlbumPath\"";
+
+    r = f.find(tag.c_str());
+    if (r <= 0)
+    {
+        log_e("CAN'T FIND currentAlbumPath");
+        free((void *)_buffer);
+        f.close();
+        return false;
+    }
+    size_t now = f.position() - tag.length() + 2;
+
+    log_i("now position: %lu\n", now);
+
+    f.seek(cur);
+
+    bufferSize = now - cur;
+    _buffer = (uint8_t *)heap_caps_realloc(_buffer, bufferSize, MALLOC_CAP_SPIRAM);
+    if (!_buffer)
+    {
+        log_e("MALLOC STR BUFFER FAIL");
+        f.close();
+        return false;
+    }
+    memset(_buffer, 0, bufferSize);
+
+    f.read(_buffer, bufferSize);
+
+    f.close();
+
+    _buffer[bufferSize - 2] = '}';
+    _buffer[bufferSize - 1] = '\0';
+
+    // Serial.println((char *)_buffer);
+
+    log_i("Buffer Size:%lu\n", bufferSize);
+
+    ret = parseUrl((char *)_buffer);
+
+    free((void *)_buffer);
+
+    return true;
+
+#else
     if (!connect(HTTP_HOST, HTTP_PORT))
     {
         log_e("CONNECT HOST FAIL");
@@ -502,9 +721,14 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
         stop();
         return false;
     }
-
-    readConntent();
-
+    // TODO : 需要更改JSON 解析
+    const char *jsonPointer = readConntent();
+#if 1
+    if (jsonPointer)
+    {
+        stop();
+    }
+#else
     index = json.indexOf(",\"currentAlbumPath\"");
     if (index > 0)
     {
@@ -516,14 +740,20 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
 #endif
         stop();
     }
+#endif
     else
     {
 #ifdef ENABLE_PRINT_SRC_JSON_BUFFER
-        Serial.println(json);
+        // Serial.println(json);
 #endif
         log_e("DATA INVALUE");
         stop();
         return false;
     }
-    return parseUrl();
+
+    Serial.printf("%s\n", jsonPointer);
+    bool ret = parseUrl(jsonPointer);
+    free((void *)jsonPointer);
+    return ret;
+#endif
 }
