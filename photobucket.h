@@ -25,10 +25,10 @@ private:
   bool parseUrl(const char *json);
   bool searchSameUrl(JsonArray &array, const char *url);
   uint32_t searchContent();
-  bool getFileName(const char *url);
+  bool getFileNameByUrl(const char *url);
   bool isFileValid();
   bool getUrlPath(String &path);
-  bool download(String url, String filename);
+  bool downloadFile(String url, String filename);
 
 protected:
   // char status[64];
