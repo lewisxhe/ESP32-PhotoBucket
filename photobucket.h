@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 
 // #define ENABLE_PRINT_SRC_JSON_BUFFER
 #define DISABLE_GIF_DOWNLOAD
@@ -27,6 +28,7 @@ private:
   bool getFileName(const char *url);
   bool isFileValid();
   bool getUrlPath(String &path);
+  bool download(String url, String filename);
 
 protected:
   // char status[64];

@@ -103,7 +103,7 @@ void setup()
     Serial.println(WiFi.localIP());
 
     // if (photoWeb.login(USER_NAME, PASSWORD))
-    // photoWeb.downloadPhoto();
+    photoWeb.downloadPhoto();
 
     // server.on("/jpg", HTTP_GET, [](AsyncWebServerRequest *request) {
     //     request->send(FILESYSTEM, "/1540550352308_zpsexn6v5oj.jpg", "image/jpg");

@@ -169,6 +169,13 @@ bool PHOTOBUCCKET::downloadPhoto()
     // for (int i = 4; i < 6; ++i)
     {
         String url = String((const char *)root[i]);
+
+#if 1
+        getFileName(url.c_str());
+        download(url,_FileName);
+        continue;
+#endif
+
         if (
             !getFileName(url.c_str()) || isFileValid() ||
 #ifdef DISABLE_GIF_DOWNLOAD
@@ -756,4 +763,77 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
     free((void *)jsonPointer);
     return ret;
 #endif
+}
+
+bool PHOTOBUCCKET::download(String url, String filename)
+{
+    if (FILESYSTEM.exists(filename) == true)
+    {
+        Serial.println("Found " + filename);
+        return true;
+    }
+    else
+        Serial.println("Downloading " + filename + " from " + url);
+
+    // if (!connected())
+    //     return false;
+
+    HTTPClient http;
+
+    Serial.print("[HTTP] begin...\n");
+
+    http.begin(url);
+
+    Serial.print("[HTTP] GET...\n");
+
+    int httpCode = http.GET();
+
+    Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+    if (httpCode <= 0)
+    {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+        http.end();
+        return false;
+    }
+
+    File f = FILESYSTEM.open(filename, "w");
+    if (!f)
+    {
+        Serial.println("file open failed");
+        http.end();
+        return false;
+    }
+
+    if (httpCode == HTTP_CODE_OK)
+    {
+        uint8_t buff[128] = {0};
+        int total = http.getSize();
+        int len = total;
+        WiFiClient *stream = http.getStreamPtr();
+
+        while (http.connected() && (len > 0 || len == -1))
+        {
+            size_t size = stream->available();
+            if (size)
+            {
+                // read up to 128 byte
+                int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+
+                // write it to Serial
+                f.write(buff, c);
+
+                if (len > 0)
+                {
+                    len -= c;
+                }
+            }
+            delay(1);
+        }
+        Serial.println();
+        Serial.print("[HTTP] connection closed or file end.\n");
+    }
+    f.close();
+    http.end();
+    return true;
 }
