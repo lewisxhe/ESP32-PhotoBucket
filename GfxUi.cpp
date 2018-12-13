@@ -219,17 +219,18 @@ void GfxUi::drawJpeg(const char *filename, int xpos, int ypos) {
   
   #if USE_SD
 
-  boolean decoded = JpegDec.decodeSdFile(jpegFile); // or pass the SD file handle to the decoder,
+  int decoded = JpegDec.decodeSdFile(jpegFile); // or pass the SD file handle to the decoder,
 
   #elif USE_SPIFFS
 
-  boolean decoded = JpegDec.decodeFsFile(jpegFile); // Pass a SPIFFS file handle to the decoder,
+  int decoded = JpegDec.decodeFsFile(jpegFile); // Pass a SPIFFS file handle to the decoder,
   
   // boolean decoded = JpegDec.decodeFsFile(filename);  // or pass the filename (leading / distinguishes SPIFFS files)
                                    // Note: the filename can be a String or character array type
   #endif
   
-  if (decoded) {
+  Serial.printf("decoded : %d\n",decoded);
+  if (decoded != -1) {
     // print information about the image to the serial port
     jpegInfo();
 

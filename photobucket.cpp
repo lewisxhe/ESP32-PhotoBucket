@@ -1,8 +1,5 @@
 #include "photobucket.h"
 #include "config.h"
-#include <lwip/sockets.h>
-#include <lwip/netdb.h>
-#include <errno.h>
 
 #define HTTPS_HOST "secure.photobucket.com"
 #define HTTPS_PORT 443
@@ -12,8 +9,6 @@
 
 #define HTTP_PHOTO_HOST "rs1268.pbsrc.com"
 #define HTTP_PHOTO_PORT 80
-
-// WiFiClientSecure client;
 
 uint16_t PHOTOBUCCKET::getUrlNums()
 {
@@ -35,18 +30,14 @@ uint16_t PHOTOBUCCKET::getUrlNums()
 bool PHOTOBUCCKET::getFileNameByUrl(const char *url)
 {
     _FileName = String(url);
-    int startIndex, endIndex;
-    startIndex = _FileName.lastIndexOf("/");
-    if (startIndex < 0)
+    int s, e;
+    s = _FileName.lastIndexOf("/");
+    e = _FileName.lastIndexOf("?");
+    if (s < 0 || e < 0)
     {
         return false;
     }
-    endIndex = _FileName.lastIndexOf("?");
-    if (endIndex < 0)
-    {
-        return false;
-    }
-    _FileName = _FileName.substring(startIndex, endIndex);
+    _FileName = _FileName.substring(s, e);
     return true;
 }
 
@@ -59,7 +50,7 @@ bool PHOTOBUCCKET::isFileValid()
     return true;
 }
 
-bool PHOTOBUCCKET::downloadPhoto()
+bool PHOTOBUCCKET::downloadPhoto(ProgressCallback progressCallback)
 {
     uint16_t nums = getUrlNums();
     log_i("SEARCH URL:%u\n", nums);
@@ -102,7 +93,7 @@ bool PHOTOBUCCKET::downloadPhoto()
             continue;
         }
 
-        downloadFile(url, _FileName);
+        downloadFile(url, _FileName, progressCallback);
     }
     return true;
 }
@@ -131,7 +122,6 @@ bool PHOTOBUCCKET::parseUrl(const char *json)
     log_i("SRAM:%lu\n", ESP.getPsramSize());
 
     log_i("ParseObject len : %u\n", strlen(json));
-    // log_i("ParseObject len : %u\n", json.length());
 
     size_t bufferSize = JSON_ARRAY_SIZE(24) + 24 * JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 24 * JSON_OBJECT_SIZE(47) + (80 * 1024);
     DynamicJsonBuffer jsonBuffer(bufferSize);
@@ -224,6 +214,7 @@ bool PHOTOBUCCKET::parseUrl(const char *json)
                 }
             }
         }
+        delete[] sameArray;
         f.close();
 
         //store to file
@@ -285,104 +276,27 @@ bool PHOTOBUCCKET::parseUrl(const char *json)
     return true;
 }
 
+// http://s1268.photobucket.com/user/Z398507699lf/library?page=2
+
+bool parseHtml()
+{
+}
+
 bool PHOTOBUCCKET::login(const char *username, const char *password)
 {
-#if 0
-    char status[64];
-    String packet = "GET /user/" + String(username) + "/library/ HTTP/1.1\r\n";
-    packet += "Host: s1268.photobucket.com\r\n";
-    packet += "Connection: keep-alive\r\n";
-    packet += "Pragma: no-cache\r\n";
-    packet += "Cache-Control: no-cache\r\n";
-    packet += "Upgrade-Insecure-Requests: 1\r\n";
-    packet += "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.75 Safari/537.36\r\n";
-    packet += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\r\n";
-    packet += "Referer: http://www.photobucket.com/\r\n";
-
-#ifdef USE_GZIP
-    packet += "Accept-Encoding: gzip, deflate\r\n";
-#else
-    packet += "Accept-Encoding: deflate\r\n";
-#endif
-    packet += "Accept-Language: zh,zh-CN;q=0.9,en;q=0.8\r\n";
-    packet += "\r\n\r\n";
-
-    int ret;
+    bool ret;
     File f;
-    size_t bufferSize = 2048;
-    struct timeval timeout;
-
-    timeout.tv_sec = 30;
-    timeout.tv_usec = 0;
-
-    if (!connect(HTTP_HOST, HTTP_PORT))
-    {
-        log_e("CONNECT HOST FAIL");
-        return false;
-    }
-
-    //Send get request
-    print(packet);
-
-    _buffer = (uint8_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_SPIRAM);
-    if (!_buffer)
-    {
-        log_e("MALLOC STR BUFFER FAIL");
-        return false;
-    }
-
-    memset(_buffer, 0, bufferSize);
-
-    setSocketOption(SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
-
-    f = FILESYSTEM.open("/index.html", FILE_WRITE);
-    if (!f)
-    {
-        free((void *)_buffer);
-        stop();
-        log_e("OPEN FAIL");
-        return false;
-    }
-
-    for (;;)
-    {
-        if ((ret = recv(fd(), _buffer, bufferSize, 0)) == -1)
-        {
-            perror("recv:");
-            free((void *)_buffer);
-            stop();
-            f.close();
-            return false;
-        }
-        else if (ret == 0)
-        {
-            log_i("SOCKET CLOSE");
-            break;
-        }
-        else
-        {
-            f.write(_buffer, ret);
-        }
-    }
-
-    stop();
-    f.close();
-#else
-
-    int ret;
-    File f;
-    size_t bufferSize = 2048;
 
     String url = "http://s1268.photobucket.com/user/" + String(username) + "/library/";
     String filename = "/index.html";
+
     if (!downloadFile(url, filename))
     {
         log_e("DOWNLOAD FAIL");
         return false;
     }
-#endif
 
-    f = FILESYSTEM.open("/index.html", "r");
+    f = FILESYSTEM.open(filename, "r");
     if (!f)
     {
         log_e("OPEN FAIL");
@@ -393,7 +307,6 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
     if (r <= 0)
     {
         log_e("CAN'T FIND collectionData");
-        free((void *)_buffer);
         f.close();
         return false;
     }
@@ -407,7 +320,6 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
     if (r <= 0)
     {
         log_e("CAN'T FIND currentAlbumPath");
-        free((void *)_buffer);
         f.close();
         return false;
     }
@@ -417,7 +329,7 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
 
     f.seek(cur);
 
-    bufferSize = now - cur;
+    size_t bufferSize = now - cur;
     _buffer = (uint8_t *)heap_caps_realloc(_buffer, bufferSize, MALLOC_CAP_SPIRAM);
     if (!_buffer)
     {
@@ -440,10 +352,15 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
 
     free((void *)_buffer);
 
-    return true;
+    return ret;
 }
 
 bool PHOTOBUCCKET::downloadFile(String url, String filename)
+{
+    return downloadFile(url, filename, nullptr);
+}
+
+bool PHOTOBUCCKET::downloadFile(String url, String filename, ProgressCallback progressCallback)
 {
     HTTPClient http;
 
@@ -475,6 +392,9 @@ bool PHOTOBUCCKET::downloadFile(String url, String filename)
         uint8_t buff[128] = {0};
         int total = http.getSize();
         int len = total;
+        if (progressCallback)
+            progressCallback(filename, 0, total);
+
         WiFiClient *stream = http.getStreamPtr();
 
         while (http.connected() && (len > 0 || len == -1))
@@ -482,15 +402,18 @@ bool PHOTOBUCCKET::downloadFile(String url, String filename)
             size_t size = stream->available();
             if (size)
             {
-                // read up to 128 byte
                 int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
 
-                // write it to Serial
                 f.write(buff, c);
 
                 if (len > 0)
                 {
                     len -= c;
+                }
+                if (progressCallback)
+                {
+                    // log_i("%d / %d \n", total - len, total);
+                    progressCallback(filename, total - len, total);
                 }
             }
             delay(1);

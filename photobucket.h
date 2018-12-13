@@ -10,30 +10,26 @@
 
 #define DATABASE_FILENAME "/photo.json"
 #define DATABASE_JSON_ARRAY_SIZE_FILE "/photoSize.json"
+
+typedef void (*ProgressCallback)(String fileName, uint32_t bytesDownloaded, uint32_t bytesTotal);
+
 class PHOTOBUCCKET : public WiFiClient
 {
 public:
   bool login(const char *username, const char *password);
-  bool downloadPhoto();
+  bool downloadPhoto(ProgressCallback progressCallback);
   void removeUrlFile();
 
 private:
   uint16_t getUrlNums();
-  bool sendGetRequest(const char *path);
-  int searchIndex();
-  const char *readConntent(); /*Read Content ,return String pointer ,need manual free*/
   bool parseUrl(const char *json);
   bool searchSameUrl(JsonArray &array, const char *url);
-  uint32_t searchContent();
   bool getFileNameByUrl(const char *url);
   bool isFileValid();
-  bool getUrlPath(String &path);
   bool downloadFile(String url, String filename);
+  bool downloadFile(String url, String filename,ProgressCallback progressCallback);
 
 protected:
-  // char status[64];
-  String _path;
   String _FileName;
-  String json;
   uint8_t *_buffer = NULL;
 };
