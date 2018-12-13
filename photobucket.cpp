@@ -116,17 +116,21 @@ void PHOTOBUCCKET::removeUrlFile()
     }
 }
 
-bool PHOTOBUCCKET::parseUrl(const char *json)
+bool PHOTOBUCCKET::parseJSON(int &pages)
 {
-
-    log_i("SRAM:%lu\n", ESP.getPsramSize());
-
-    log_i("ParseObject len : %u\n", strlen(json));
+    // log_i("ParseObject len : %u\n", strlen(json));
 
     size_t bufferSize = JSON_ARRAY_SIZE(24) + 24 * JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 24 * JSON_OBJECT_SIZE(47) + (80 * 1024);
     DynamicJsonBuffer jsonBuffer(bufferSize);
 
-    JsonObject &root = jsonBuffer.parseObject(json);
+    File f = FILESYSTEM.open(_dateBaseFileName, FILE_READ);
+    if (!f)
+        return false;
+
+    JsonObject &root = jsonBuffer.parseObject(f);
+
+    f.close();
+
     if (!root.success())
     {
         log_i("Parsing failed!");
@@ -134,16 +138,15 @@ bool PHOTOBUCCKET::parseUrl(const char *json)
     }
     log_i("Parsing Success");
 
-    log_i("SRAM:%lu\n", ESP.getPsramSize());
-
-    int pageSize = root["pageSize"];
+    pages = root["pageSize"];
+    // int pageSize = root["pageSize"];
     JsonObject &items = root["items"];
     int items_total = items["total"];
 
     JsonArray &items_objects = items["objects"];
 
     log_i("---------Information--------------");
-    log_i("pageSize     (%d)", pageSize);
+    log_i("pageSize     (%d)", pages);
     log_i("items_total  (%d)", items_total);
     log_i("objects size (%u)", items_objects.size());
     log_i("--------------END-----------------");
@@ -155,16 +158,13 @@ bool PHOTOBUCCKET::parseUrl(const char *json)
     }
 
     int arrayObjects = items_objects.size();
-    log_i("SRAM:%lu\n", ESP.getPsramSize());
 
     //Create Array
     bufferSize = JSON_ARRAY_SIZE(arrayObjects) + arrayObjects * JSON_OBJECT_SIZE(1);
     DynamicJsonBuffer arrayBuffer(bufferSize);
     JsonArray *rootArray = nullptr;
 
-    log_i("SRAM:%lu\n", ESP.getPsramSize());
-
-    File f;
+    // File f;
     bool exists = false;
     if (FILESYSTEM.exists(DATABASE_FILENAME))
     {
@@ -276,27 +276,10 @@ bool PHOTOBUCCKET::parseUrl(const char *json)
     return true;
 }
 
-// http://s1268.photobucket.com/user/Z398507699lf/library?page=2
-
-bool parseHtml()
-{
-}
-
-bool PHOTOBUCCKET::login(const char *username, const char *password)
+bool PHOTOBUCCKET::parseHtml()
 {
     bool ret;
-    File f;
-
-    String url = "http://s1268.photobucket.com/user/" + String(username) + "/library/";
-    String filename = "/index.html";
-
-    if (!downloadFile(url, filename))
-    {
-        log_e("DOWNLOAD FAIL");
-        return false;
-    }
-
-    f = FILESYSTEM.open(filename, "r");
+    File f = FILESYSTEM.open(_dateBaseFileName, FILE_READ);
     if (!f)
     {
         log_e("OPEN FAIL");
@@ -330,7 +313,7 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
     f.seek(cur);
 
     size_t bufferSize = now - cur;
-    _buffer = (uint8_t *)heap_caps_realloc(_buffer, bufferSize, MALLOC_CAP_SPIRAM);
+    _buffer = (uint8_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_SPIRAM);
     if (!_buffer)
     {
         log_e("MALLOC STR BUFFER FAIL");
@@ -348,11 +331,82 @@ bool PHOTOBUCCKET::login(const char *username, const char *password)
 
     log_i("Buffer Size:%lu\n", bufferSize);
 
-    ret = parseUrl((char *)_buffer);
+    f = FILESYSTEM.open(_dateBaseFileName, FILE_WRITE);
+    if (!f)
+    {
+        log_e("OPEN FAIL");
+        free((void *)_buffer);
+        return false;
+    }
+
+    f.write(_buffer, bufferSize);
+
+    f.close();
 
     free((void *)_buffer);
+    _buffer = NULL;
+    return true;
+}
 
-    return ret;
+void PHOTOBUCCKET::testGET()
+{
+    int pages = 0;
+    if (!getMainPage())
+    {
+        log_e("GET INDEX FAIL");
+        return;
+    }
+    if (!parseHtml())
+    {
+        log_e("parseHtml FAIL");
+        return;
+    }
+    if (!parseJSON(pages))
+    {
+        log_e("parseJSON FAIL");
+        return;
+    }
+
+    //TODO numPages : 代表所有页码
+
+    log_i("Pages total:%d\n", pages);
+
+    for (int i = 2; i < pages; i++)
+    {
+        int s = 0;
+        if (jumpPage(i))
+        {
+            if (parseHtml())
+            {
+                if (!parseJSON(s))
+                {
+                    log_i("parseJSON FAIL");
+                }
+            }
+            else
+                log_e("parseHtml FAIL");
+        }
+        delay(2000);
+    }
+}
+
+bool PHOTOBUCCKET::getMainPage()
+{
+    return jumpPage(1);
+}
+
+bool PHOTOBUCCKET::jumpPage(int page)
+{
+    String url = "http://s1268.photobucket.com/user/" + _userName + "/library/?page=" + String(page);
+
+    log_i("[GET] %s\n", url.c_str());
+
+    if (!downloadFile(url, _dateBaseFileName))
+    {
+        log_e("DOWNLOAD FAIL");
+        return false;
+    }
+    return true;
 }
 
 bool PHOTOBUCCKET::downloadFile(String url, String filename)

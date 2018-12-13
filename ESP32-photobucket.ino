@@ -23,7 +23,7 @@ SPIClass SDSPI(HSPI);
 
 TFT_eSPI tft = TFT_eSPI();
 GfxUi ui = GfxUi(&tft);
-PHOTOBUCCKET photoWeb;
+PHOTOBUCCKET photoWeb(USER_NAME);
 // AsyncWebServer server(80);
 
 #define BUTTON_1 37
@@ -188,11 +188,13 @@ void setup()
 
     xTaskCreate(buttonTask, "", 2048, NULL, 2, NULL);
 
-    if (photoWeb.login(USER_NAME, PASSWORD))
-    {
-        tft.fillScreen(TFT_BLACK);
-        photoWeb.downloadPhoto(downloadCallback);
-    }
+    photoWeb.testGET();
+    while(1);
+    // if (photoWeb.login(USER_NAME, PASSWORD))
+    // {
+    //     tft.fillScreen(TFT_BLACK);
+    //     photoWeb.downloadPhoto(downloadCallback);
+    // }
 
     if ((files = searchPhotoFiles(FILESYSTEM, "/", 2, NULL)) == 0)
     {

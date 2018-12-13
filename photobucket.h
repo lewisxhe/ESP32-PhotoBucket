@@ -16,20 +16,26 @@ typedef void (*ProgressCallback)(String fileName, uint32_t bytesDownloaded, uint
 class PHOTOBUCCKET : public WiFiClient
 {
 public:
-  bool login(const char *username, const char *password);
+  PHOTOBUCCKET(String userName){_userName = userName;};
+  bool getMainPage();
   bool downloadPhoto(ProgressCallback progressCallback);
   void removeUrlFile();
+  bool jumpPage(int page);
+  bool parseHtml();
+  bool parseJSON(int &pages);
+  void testGET();
 
 private:
   uint16_t getUrlNums();
-  bool parseUrl(const char *json);
   bool searchSameUrl(JsonArray &array, const char *url);
   bool getFileNameByUrl(const char *url);
   bool isFileValid();
   bool downloadFile(String url, String filename);
-  bool downloadFile(String url, String filename,ProgressCallback progressCallback);
+  bool downloadFile(String url, String filename, ProgressCallback progressCallback);
 
 protected:
+  String _dateBaseFileName = "/index.html";
+  String _userName;
   String _FileName;
   uint8_t *_buffer = NULL;
 };
