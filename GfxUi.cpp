@@ -232,7 +232,7 @@ void GfxUi::drawJpeg(const char *filename, int xpos, int ypos) {
   Serial.printf("decoded : %d\n",decoded);
   if (decoded != -1) {
     // print information about the image to the serial port
-    jpegInfo();
+    // jpegInfo();
 
     // render the image onto the screen at given coordinates
     jpegRender(xpos, ypos);

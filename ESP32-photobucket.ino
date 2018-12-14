@@ -24,7 +24,6 @@ SPIClass SDSPI(HSPI);
 TFT_eSPI tft = TFT_eSPI();
 GfxUi ui = GfxUi(&tft);
 PHOTOBUCCKET photoWeb(USER_NAME);
-// AsyncWebServer server(80);
 
 #define BUTTON_1 37
 #define BUTTON_2 38
@@ -33,6 +32,7 @@ PHOTOBUCCKET photoWeb(USER_NAME);
 OneButton button1(BUTTON_1, true);
 OneButton button2(BUTTON_2, true);
 OneButton button3(BUTTON_3, true);
+
 int files;
 int searchPhotoFiles(fs::FS &fs, const char *dirname, uint8_t levels, void (*callback)(const char *filename, int type));
 void darwPhotoTask(const char *filename, int type);
@@ -77,11 +77,9 @@ void listDir(fs::FS &fs, const char *dirname, uint8_t levels)
 
 void downloadCallback(String filename, uint32_t bytesDownloaded, uint32_t bytesTotal)
 {
-
     tft.setTextDatum(BC_DATUM);
     tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     tft.setTextPadding(320);
-
     int percentage = 100 * bytesDownloaded / bytesTotal;
     if (percentage == 0)
     {
@@ -108,6 +106,7 @@ void click3()
 {
     Serial.println(__func__);
 }
+
 void buttonTask(void *param)
 {
     for (;;)
@@ -115,8 +114,16 @@ void buttonTask(void *param)
         button1.tick();
         button2.tick();
         button3.tick();
-        delay(5);
+        delay(10);
     }
+}
+
+void downloadTask(void *param)
+{
+    // photoWeb.setProgressCallback(downloadCallback);
+    photoWeb.testGET();
+    photoWeb.downloadPhoto();
+    vTaskDelete(NULL);
 }
 
 void setup()
@@ -126,6 +133,8 @@ void setup()
     {
         ;
     }
+
+    Serial.printf("SPRAM:%lu\n", ESP.getPsramSize());
 
     tft.init();
     tft.setRotation(1);
@@ -147,8 +156,12 @@ void setup()
             delay(1000);
         }
     }
-    uint32_t sdSize = FILESYSTEM.cardSize() / 1024 / 1024;
-    tft.println("SD Card Size:" + String(sdSize) + "MB");
+    uint32_t cardSize = FILESYSTEM.cardSize() / 1024 / 1024;
+    uint32_t totalBytes = FILESYSTEM.totalBytes() / 1024;
+    uint32_t usedBytes = FILESYSTEM.usedBytes() / 1024;
+
+    Serial.printf("cardSize:%lu totalBytes:%lu usedBytes:%lu\n", cardSize, totalBytes, usedBytes);
+    tft.println("SD Card Size:" + String(cardSize) + "MB");
     delay(200);
     tft.println("WiFi Init Begin ...");
     delay(200);
@@ -186,28 +199,17 @@ void setup()
     button2.attachClick(click2);
     button3.attachClick(click3);
 
-    xTaskCreate(buttonTask, "", 2048, NULL, 2, NULL);
-
-    photoWeb.testGET();
-    while(1);
-    // if (photoWeb.login(USER_NAME, PASSWORD))
-    // {
-    //     tft.fillScreen(TFT_BLACK);
-    //     photoWeb.downloadPhoto(downloadCallback);
-    // }
-
-    if ((files = searchPhotoFiles(FILESYSTEM, "/", 2, NULL)) == 0)
-    {
-        tft.setTextDatum(BC_DATUM);
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        tft.fillScreen(TFT_BLACK);
-        tft.drawString("No search photo files", 120, 240);
-        while (1)
-        {
-            delay(100000);
-        }
-    }
+    files = searchPhotoFiles(FILESYSTEM, "/", 2, NULL);
     Serial.printf("Search Photo : %d\n", files);
+
+    // tft.setTextDatum(BC_DATUM);
+    // tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    // tft.fillScreen(TFT_BLACK);
+    // tft.drawString("No search photo files", 120, 240);
+
+    tft.fillScreen(TFT_BLACK);
+    xTaskCreate(downloadTask, "", 4096, NULL, 2, NULL);
+    // xTaskCreate(buttonTask, "", 2048, NULL, 2, NULL);
 }
 
 int searchPhotoFiles(fs::FS &fs, const char *dirname, uint8_t levels, void (*callback)(const char *filename, int type))
@@ -271,5 +273,6 @@ void darwPhotoTask(const char *filename, int type)
 
 void loop()
 {
-    searchPhotoFiles(FILESYSTEM, "/", 2, darwPhotoTask);
+    if (files)
+        searchPhotoFiles(FILESYSTEM, "/", 2, darwPhotoTask);
 }

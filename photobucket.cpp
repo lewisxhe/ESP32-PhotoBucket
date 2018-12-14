@@ -50,7 +50,7 @@ bool PHOTOBUCCKET::isFileValid()
     return true;
 }
 
-bool PHOTOBUCCKET::downloadPhoto(ProgressCallback progressCallback)
+bool PHOTOBUCCKET::downloadPhoto()
 {
     uint16_t nums = getUrlNums();
     log_i("SEARCH URL:%u\n", nums);
@@ -80,6 +80,7 @@ bool PHOTOBUCCKET::downloadPhoto(ProgressCallback progressCallback)
 
     for (int i = 0; i < nums; ++i)
     {
+
         String url = String((const char *)root[i]);
 
         if (
@@ -92,8 +93,8 @@ bool PHOTOBUCCKET::downloadPhoto(ProgressCallback progressCallback)
             stop();
             continue;
         }
-
-        downloadFile(url, _FileName, progressCallback);
+        log_i("Down[%d]", i);
+        downloadFile(url, _FileName);
     }
     return true;
 }
@@ -116,10 +117,8 @@ void PHOTOBUCCKET::removeUrlFile()
     }
 }
 
-bool PHOTOBUCCKET::parseJSON(int &pages)
+bool PHOTOBUCCKET::parseJSON()
 {
-    // log_i("ParseObject len : %u\n", strlen(json));
-
     size_t bufferSize = JSON_ARRAY_SIZE(24) + 24 * JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 24 * JSON_OBJECT_SIZE(47) + (80 * 1024);
     DynamicJsonBuffer jsonBuffer(bufferSize);
 
@@ -138,15 +137,14 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
     }
     log_i("Parsing Success");
 
-    pages = root["pageSize"];
-    // int pageSize = root["pageSize"];
+    int pageSize = root["pageSize"];
     JsonObject &items = root["items"];
     int items_total = items["total"];
 
     JsonArray &items_objects = items["objects"];
 
     log_i("---------Information--------------");
-    log_i("pageSize     (%d)", pages);
+    log_i("pageSize     (%d)", pageSize);
     log_i("items_total  (%d)", items_total);
     log_i("objects size (%u)", items_objects.size());
     log_i("--------------END-----------------");
@@ -160,7 +158,7 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
     int arrayObjects = items_objects.size();
 
     //Create Array
-    bufferSize = JSON_ARRAY_SIZE(arrayObjects) + arrayObjects * JSON_OBJECT_SIZE(1);
+    bufferSize = JSON_ARRAY_SIZE(arrayObjects) + arrayObjects * 120;
     DynamicJsonBuffer arrayBuffer(bufferSize);
     JsonArray *rootArray = nullptr;
 
@@ -175,10 +173,32 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
             log_e("OPEN FILE FAIL");
             return false;
         }
-        rootArray = &arrayBuffer.parseArray(f.readString());
+
+        _buffer = (uint8_t *)heap_caps_malloc(f.size(), MALLOC_CAP_SPIRAM);
+        if (!_buffer)
+        {
+            log_e("MALLOC FAIL");
+            f.close();
+            return false;
+        }
+
+        memset(_buffer, 0, f.size());
+
+        if (f.size() != f.read(_buffer, f.size()))
+        {
+            log_i("READ SIZE ERROR");
+            f.close();
+            free((void *)_buffer);
+            return false;
+        }
+        f.close();
+
+        rootArray = &arrayBuffer.parseArray((const char *)_buffer);
+
         if (!rootArray->success())
         {
             log_e("PARSER ARRAY BUFFER FAIL");
+            free((void *)_buffer);
             return false;
         }
 
@@ -190,6 +210,7 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
         catch (std::bad_alloc)
         {
             log_e("NEW ARRAY BUFFER FAIL");
+            free((void *)_buffer);
             return false;
         }
 
@@ -206,16 +227,18 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
             if (sameArray[i])
             {
                 const char *url = items_objects[i]["mobileFullsizeUrl"];
-                log_i("add url:%s\n", url);
+                // log_i("add url:%s\n", url);
                 if (!rootArray->add(url))
                 {
                     log_e("ADD ARRAY OBJECT FAIL");
+                    free((void *)_buffer);
+                    delete[] sameArray;
                     return false;
                 }
             }
         }
+        free((void *)_buffer);
         delete[] sameArray;
-        f.close();
 
         //store to file
         f = FILESYSTEM.open(DATABASE_FILENAME, FILE_WRITE);
@@ -253,13 +276,17 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
         rootArray->printTo(f);
         f.close();
     }
-    log_i("---------Information--------------");
-    log_i("objects size (%u)", rootArray->size());
-    log_i("--------------END-----------------");
+
+#ifdef ENABKE_PRINT_FILE_JSON
     Serial.println();
     rootArray->prettyPrintTo(Serial);
     Serial.println();
+#endif
+    log_i("---------Information--------------");
+    log_i("objects size (%u)", rootArray->size());
+    log_i("--------------END-----------------");
 
+    // Write JsonArray total
     f = FILESYSTEM.open(DATABASE_JSON_ARRAY_SIZE_FILE, FILE_WRITE);
     if (!f)
     {
@@ -276,7 +303,46 @@ bool PHOTOBUCCKET::parseJSON(int &pages)
     return true;
 }
 
-bool PHOTOBUCCKET::parseHtml()
+uint16_t PHOTOBUCCKET::searchPageTotal()
+{
+    char buf[64] = {0};
+    size_t cur, now;
+
+    File f = FILESYSTEM.open(_dateBaseFileName, FILE_READ);
+    if (!f)
+    {
+        log_e("OPEN FAIL");
+        return false;
+    }
+    if (f.find("\"numPages\":") < 0)
+    {
+        log_e("FIND FAIL");
+        f.close();
+        return 0;
+    }
+    cur = f.position();
+
+    if (f.find(",") < 0)
+    {
+        log_e("FIND FAIL");
+        f.close();
+        return 0;
+    }
+
+    now = f.position() - 1;
+
+    f.seek(cur);
+
+    f.read((uint8_t *)buf, now - cur);
+
+    log_i("cur:%lu --- now:%lu --- size:%lu --- read:%lu", cur, now, now - cur, atoi(buf));
+
+    f.close();
+
+    return atoi(String(buf).c_str());
+}
+
+bool PHOTOBUCCKET::parseHTML()
 {
     bool ret;
     File f = FILESYSTEM.open(_dateBaseFileName, FILE_READ);
@@ -350,43 +416,33 @@ bool PHOTOBUCCKET::parseHtml()
 
 void PHOTOBUCCKET::testGET()
 {
-    int pages = 0;
     if (!getMainPage())
     {
         log_e("GET INDEX FAIL");
         return;
     }
-    if (!parseHtml())
+    uint16_t total = searchPageTotal();
+
+    if (getUrlNums() == total)
     {
-        log_e("parseHtml FAIL");
-        return;
-    }
-    if (!parseJSON(pages))
-    {
-        log_e("parseJSON FAIL");
         return;
     }
 
-    //TODO numPages : 代表所有页码
-
-    log_i("Pages total:%d\n", pages);
-
-    for (int i = 2; i < pages; i++)
+    bool htmlVaild = true;
+    for (uint16_t i = 2; i <= total + 1; i++)
     {
-        int s = 0;
-        if (jumpPage(i))
+        if (htmlVaild && parseHTML())
         {
-            if (parseHtml())
+            if (!parseJSON())
             {
-                if (!parseJSON(s))
-                {
-                    log_i("parseJSON FAIL");
-                }
+                log_e("parseJSON FAIL");
             }
-            else
-                log_e("parseHtml FAIL");
         }
-        delay(2000);
+        if (i != total + 1)
+        {
+            delay(2000);
+            htmlVaild = jumpPage(i);
+        }
     }
 }
 
@@ -410,11 +466,6 @@ bool PHOTOBUCCKET::jumpPage(int page)
 }
 
 bool PHOTOBUCCKET::downloadFile(String url, String filename)
-{
-    return downloadFile(url, filename, nullptr);
-}
-
-bool PHOTOBUCCKET::downloadFile(String url, String filename, ProgressCallback progressCallback)
 {
     HTTPClient http;
 
@@ -446,8 +497,8 @@ bool PHOTOBUCCKET::downloadFile(String url, String filename, ProgressCallback pr
         uint8_t buff[128] = {0};
         int total = http.getSize();
         int len = total;
-        if (progressCallback)
-            progressCallback(filename, 0, total);
+        if (_progressCallback)
+            _progressCallback(filename, 0, total);
 
         WiFiClient *stream = http.getStreamPtr();
 
@@ -464,10 +515,10 @@ bool PHOTOBUCCKET::downloadFile(String url, String filename, ProgressCallback pr
                 {
                     len -= c;
                 }
-                if (progressCallback)
+                if (_progressCallback)
                 {
                     // log_i("%d / %d \n", total - len, total);
-                    progressCallback(filename, total - len, total);
+                    _progressCallback(filename, total - len, total);
                 }
             }
             delay(1);

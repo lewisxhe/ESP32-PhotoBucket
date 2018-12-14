@@ -6,6 +6,7 @@
 #include <HTTPClient.h>
 
 // #define ENABLE_PRINT_SRC_JSON_BUFFER
+// #define ENABKE_PRINT_FILE_JSON
 #define DISABLE_GIF_DOWNLOAD
 
 #define DATABASE_FILENAME "/photo.json"
@@ -16,24 +17,27 @@ typedef void (*ProgressCallback)(String fileName, uint32_t bytesDownloaded, uint
 class PHOTOBUCCKET : public WiFiClient
 {
 public:
-  PHOTOBUCCKET(String userName){_userName = userName;};
+  PHOTOBUCCKET(String userName) { _userName = userName; };
+  ~PHOTOBUCCKET() {}
   bool getMainPage();
-  bool downloadPhoto(ProgressCallback progressCallback);
+  bool downloadPhoto();
   void removeUrlFile();
   bool jumpPage(int page);
-  bool parseHtml();
-  bool parseJSON(int &pages);
+  bool parseHTML();
+  bool parseJSON();
   void testGET();
+  void setProgressCallback(ProgressCallback progressCallback) { _progressCallback = progressCallback; }
 
 private:
+  uint16_t searchPageTotal();
   uint16_t getUrlNums();
   bool searchSameUrl(JsonArray &array, const char *url);
   bool getFileNameByUrl(const char *url);
   bool isFileValid();
   bool downloadFile(String url, String filename);
-  bool downloadFile(String url, String filename, ProgressCallback progressCallback);
 
 protected:
+  ProgressCallback _progressCallback = NULL;
   String _dateBaseFileName = "/index.html";
   String _userName;
   String _FileName;
