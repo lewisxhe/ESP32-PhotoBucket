@@ -136,6 +136,8 @@ void setup()
 
     Serial.printf("SPRAM:%lu\n", ESP.getPsramSize());
 
+    // TODO : 需要添加内存卡容量检查
+
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
