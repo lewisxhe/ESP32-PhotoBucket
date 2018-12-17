@@ -31,7 +31,6 @@ https://github.com/Bodmer/TFT_eSPI
 // JPEG decoder library
 #include <JPEGDecoder.h>
 
-#include "tjpgd.h"
 
 #ifndef _GFX_UI_H
 #define _GFX_UI_H
@@ -41,44 +40,10 @@ https://github.com/Bodmer/TFT_eSPI
 #define FILESYSTEM SD //defaule image from sd ,you can change from SPIFFS
 #endif
 
-#define CENTER -9003
-#define RIGHT -9004
-#define BOTTOM -9004
-
-#define JPG_IMAGE_LINE_BUF_SIZE 512
 // Maximum of 85 for BUFFPIXEL as 3 x this value is stored in an 8 bit variable!
 // 32 is an efficient size for SPIFFS due to SPI hardware pipeline buffer size
 // A larger value of 80 is better for SD cards
 #define BUFFPIXEL 32
-
-typedef struct __attribute__((__packed__))
-{
-  uint8_t r;
-  uint8_t g;
-  uint8_t b;
-} color_t;
-
-typedef struct
-{
-  uint16_t x1;
-  uint16_t y1;
-  uint16_t x2;
-  uint16_t y2;
-} dispWin_t;
-
-typedef struct
-{
-  File fhndl; // File handler for input function
-  int x;      // image top left point X position
-  int y;      // image top left point Y position
-  int s;
-  bool found_header;
-  uint8_t *membuff;   // memory buffer containing the image
-  uint32_t bufsize;   // size of the memory buffer
-  uint32_t bufptr;    // memory buffer current position
-  color_t *linbuf[2]; // memory buffer used for display output
-  uint8_t linbuf_idx;
-} JPGIODEV;
 
 class GfxUi
 {
@@ -89,16 +54,10 @@ public:
   void jpegInfo();
   void drawJpeg(const char *filename, int xpos, int ypos);
   void jpegRender(int xpos, int ypos);
-  // void drawJpeg(int x, int y, uint8_t scale, int s, char *filename, uint8_t *buf, int size);
 
 private:
   TFT_eSPI *_tft;
   uint16_t read16(fs::File &f);
   uint32_t read32(fs::File &f);
-  // uint32_t outputScreen(JDEC *jd, void *bitmap, JRECT *rect);
-  // uint32_t inputFromFile(JDEC *jd, BYTE *buff, UINT nd);
-  // dispWin_t _dispWin;
-  // uint8_t _image_debug = 1;
 };
-
 #endif

@@ -4,7 +4,5 @@ passwd.h
 *.json
 *.htm
 *.html
-tmp.cpp
-data
-str.cpp
 tjpgd
+other

@@ -297,8 +297,10 @@ bool PHOTOBUCCKET::parseJSON()
     jsonBuffer.clear();
     JsonObject &sizeJson = jsonBuffer.createObject();
     sizeJson["size"] = rootArray->size();
-    sizeJson.printTo(Serial);
     sizeJson.printTo(f);
+#ifdef ENABKE_PRINT_FILE_JSON
+    sizeJson.printTo(Serial);
+#endif
     f.close();
     return true;
 }

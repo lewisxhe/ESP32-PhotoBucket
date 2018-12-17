@@ -1,79 +1,26 @@
 #include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
 #include <Esp.h>
 #include <TFT_eSPI.h>
-#include "photobucket.h"
 #include <SPI.h>
-#include "config.h"
-#include <JPEGDecoder.h>
 #include "GfxUi.h"
-// #include "miniz.h"
-// #include "mini_gzip.h"
-#include <OneButton.h>
+#include "photobucket.h"
+#include "config.h" //The first time you need to edit the config file
+
 
 // Bitmap_WiFi
 extern uint8_t wifi_1[];
 extern uint8_t wifi_2[];
 extern uint8_t wifi_3[];
 
-#if USE_SD
 SPIClass SDSPI(HSPI);
-#endif
-
 TFT_eSPI tft = TFT_eSPI();
 GfxUi ui = GfxUi(&tft);
 PHOTOBUCCKET photoWeb(USER_NAME);
 
-#define BUTTON_1 37
-#define BUTTON_2 38
-#define BUTTON_3 39
-
-OneButton button1(BUTTON_1, true);
-OneButton button2(BUTTON_2, true);
-OneButton button3(BUTTON_3, true);
 
 int files;
 int searchPhotoFiles(fs::FS &fs, const char *dirname, uint8_t levels, void (*callback)(const char *filename, int type));
 void darwPhotoTask(const char *filename, int type);
-
-void listDir(fs::FS &fs, const char *dirname, uint8_t levels)
-{
-    Serial.printf("Listing directory: %s\r\n", dirname);
-
-    File root = fs.open(dirname);
-    if (!root)
-    {
-        Serial.println("- failed to open directory");
-        return;
-    }
-    if (!root.isDirectory())
-    {
-        Serial.println(" - not a directory");
-        return;
-    }
-
-    File file = root.openNextFile();
-    while (file)
-    {
-        if (file.isDirectory())
-        {
-            Serial.print("  DIR : ");
-            Serial.println(file.name());
-            if (levels)
-            {
-                listDir(fs, file.name(), levels - 1);
-            }
-        }
-        else
-        {
-            Serial.print(" REMOVE FILE: ");
-            Serial.print(file.name());
-            FILESYSTEM.remove("/" + String(file.name()));
-        }
-        file = root.openNextFile();
-    }
-}
 
 void downloadCallback(String filename, uint32_t bytesDownloaded, uint32_t bytesTotal)
 {
@@ -94,30 +41,6 @@ void downloadCallback(String filename, uint32_t bytesDownloaded, uint32_t bytesT
     }
 }
 
-void click1()
-{
-    Serial.println(__func__);
-}
-void click2()
-{
-    Serial.println(__func__);
-}
-void click3()
-{
-    Serial.println(__func__);
-}
-
-void buttonTask(void *param)
-{
-    for (;;)
-    {
-        button1.tick();
-        button2.tick();
-        button3.tick();
-        delay(10);
-    }
-}
-
 void downloadTask(void *param)
 {
     // photoWeb.setProgressCallback(downloadCallback);
@@ -133,10 +56,7 @@ void setup()
     {
         ;
     }
-
     Serial.printf("SPRAM:%lu\n", ESP.getPsramSize());
-
-    // TODO : 需要添加内存卡容量检查
 
     tft.init();
     tft.setRotation(1);
@@ -145,12 +65,8 @@ void setup()
     tft.setTextColor(TFT_WHITE);
     tft.setCursor(0, 0);
 
-#if USE_SD
     SDSPI.begin(SPI_SD_CLK, SPI_SD_MISO, SPI_SD_MOSI, SPI_SD_CS);
     if (!FILESYSTEM.begin(SPI_SD_CS, SDSPI))
-#elif USE_SPIFFS
-    if (!FILESYSTEM.begin())
-#endif
     {
         tft.println("FILESYSTEM Mount FAIL");
         while (1)
@@ -192,26 +108,16 @@ void setup()
             esp_restart();
         }
     }
-
     tft.print("WiFi connected:");
     tft.println(WiFi.localIP());
     delay(1500);
 
-    button1.attachClick(click1);
-    button2.attachClick(click2);
-    button3.attachClick(click3);
 
     files = searchPhotoFiles(FILESYSTEM, "/", 2, NULL);
     Serial.printf("Search Photo : %d\n", files);
 
-    // tft.setTextDatum(BC_DATUM);
-    // tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    // tft.fillScreen(TFT_BLACK);
-    // tft.drawString("No search photo files", 120, 240);
-
     tft.fillScreen(TFT_BLACK);
     xTaskCreate(downloadTask, "", 4096, NULL, 2, NULL);
-    // xTaskCreate(buttonTask, "", 2048, NULL, 2, NULL);
 }
 
 int searchPhotoFiles(fs::FS &fs, const char *dirname, uint8_t levels, void (*callback)(const char *filename, int type))
@@ -233,11 +139,10 @@ int searchPhotoFiles(fs::FS &fs, const char *dirname, uint8_t levels, void (*cal
     {
         if (!file.isDirectory())
         {
-            Serial.print("  FILE: ");
-            Serial.print(file.name());
-            Serial.print("\tSIZE: ");
-            Serial.println(file.size());
-
+            // Serial.print("  FILE: ");
+            // Serial.print(file.name());
+            // Serial.print("\tSIZE: ");
+            // Serial.println(file.size());
             String name = String(file.name());
             if (name.endsWith(".jpg") || name.endsWith(".JPG") || name.endsWith(".jpeg"))
             {
